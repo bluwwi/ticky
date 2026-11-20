@@ -1,0 +1,35 @@
+id = "tactile"
+name = "Tactile"
+author = "StavSounds, Foxfire-, alpinemesh, yottasounds"
+license = "CC0-1.0"
+source_url = "https://freesound.org/people/StavSounds/packs/42151"
+description = "Twelve round-robin tactile key presses plus key-up, enter and backspace, recorded from a mechanical keyboard."
+
+[sounds]
+key_down = [
+    "samples/down-01.wav",
+    "samples/down-02.wav",
+    "samples/down-03.wav",
+    "samples/down-04.wav",
+    "samples/down-05.wav",
+    "samples/down-06.wav",
+    "samples/down-07.wav",
+    "samples/down-08.wav",
+    "samples/down-09.wav",
+    "samples/down-10.wav",
+    "samples/down-11.wav",
+    "samples/down-12.wav",
+]
+key_up = ["samples/up-01.wav"]
+enter = ["samples/enter-down-01.wav"]
+backspace = ["samples/backspace-down-01.wav"]
+
+mouse_left = ["mouse/left.wav"]
+mouse_right = ["mouse/right.wav"]
+mouse_middle = ["mouse/middle.wav"]
+mouse_back = ["mouse/back.wav"]
+mouse_forward = ["mouse/forward.wav"]
+mouse_wheel_up = ["mouse/wheel_up.wav"]
+mouse_wheel_down = ["mouse/wheel_down.wav"]
+mouse_wheel_left = ["mouse/wheel_left.wav"]
+mouse_wheel_right = ["mouse/wheel_right.wav"]

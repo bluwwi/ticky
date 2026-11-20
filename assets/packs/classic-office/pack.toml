@@ -1,0 +1,39 @@
+id = "classic-office"
+name = "Classic Office"
+author = "unicaegames"
+license = "CC0-1.0"
+source_url = "https://opengameart.org/content/keyboard-soundpack-1-typing-and-single-keystrokes"
+description = "Sixteen round-robin single keystrokes with a soft, muted office-keyboard timbre."
+
+[sounds]
+key_down = [
+    "samples/down-01.wav",
+    "samples/down-02.wav",
+    "samples/down-03.wav",
+    "samples/down-04.wav",
+    "samples/down-05.wav",
+    "samples/down-06.wav",
+    "samples/down-07.wav",
+    "samples/down-08.wav",
+    "samples/down-09.wav",
+    "samples/down-10.wav",
+    "samples/down-11.wav",
+    "samples/down-12.wav",
+    "samples/down-13.wav",
+    "samples/down-14.wav",
+    "samples/down-15.wav",
+    "samples/down-16.wav",
+]
+key_up = []
+enter = []
+backspace = []
+
+mouse_left = ["mouse/left.wav"]
+mouse_right = ["mouse/right.wav"]
+mouse_middle = ["mouse/middle.wav"]
+mouse_back = ["mouse/back.wav"]
+mouse_forward = ["mouse/forward.wav"]
+mouse_wheel_up = ["mouse/wheel_up.wav"]
+mouse_wheel_down = ["mouse/wheel_down.wav"]
+mouse_wheel_left = ["mouse/wheel_left.wav"]
+mouse_wheel_right = ["mouse/wheel_right.wav"]
