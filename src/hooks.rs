@@ -1,8 +1,9 @@
 use crate::audio::AudioHandle;
 use crate::packs::Pack;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_BACK, VK_RETURN};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -95,8 +96,9 @@ pub struct Engine {
     enabled: AtomicBool,
     muted: AtomicBool,
     cursor: AtomicUsize,
+    pressed: Mutex<HashSet<u32>>,
     samples: RwLock<SampleSet>,
-    audio: AudioHandle,
+    audio: RwLock<AudioHandle>,
 }
 
 impl Engine {
@@ -105,9 +107,18 @@ impl Engine {
             enabled: AtomicBool::new(true),
             muted: AtomicBool::new(false),
             cursor: AtomicUsize::new(0),
+            pressed: Mutex::new(HashSet::new()),
             samples: RwLock::new(SampleSet::default()),
-            audio,
+            audio: RwLock::new(audio),
         }
+    }
+
+    pub fn set_audio(&self, audio: AudioHandle) {
+        *self.audio.write().unwrap() = audio;
+    }
+
+    pub fn shutdown_audio(&self) {
+        self.audio.read().unwrap().shutdown();
     }
 
     pub fn set_flags(&self, enabled: bool, muted: bool) {
@@ -129,7 +140,7 @@ impl Engine {
             .or_else(|| Self::pick(&self.cursor, &samples.enter))
             .or_else(|| Self::pick(&self.cursor, &samples.mouse_left))
             .ok_or_else(|| "This pack has no playable samples".to_string())?;
-        self.audio.play(bytes, 1.0);
+        self.audio.read().unwrap().play(bytes, 1.0);
         Ok(())
     }
 
@@ -148,26 +159,33 @@ impl Engine {
 
     fn emit(&self, list: &[Arc<[u8]>]) {
         if let Some(bytes) = Self::pick(&self.cursor, list) {
-            self.audio.play(bytes, 1.0);
+            self.audio.read().unwrap().play(bytes, 1.0);
         }
     }
 
     fn on_key(&self, vk: u32, down: bool) {
+        let mut pressed = self.pressed.lock().unwrap();
+        if down {
+            if !pressed.insert(vk) {
+                return;
+            }
+        } else {
+            pressed.remove(&vk);
+            return;
+        }
+        drop(pressed);
+
         if !self.is_active() {
             return;
         }
 
         let samples = self.samples.read().unwrap();
-        let list = if down {
-            if vk == VK_RETURN.0 as u32 && !samples.enter.is_empty() {
-                &samples.enter
-            } else if vk == VK_BACK.0 as u32 && !samples.backspace.is_empty() {
-                &samples.backspace
-            } else {
-                &samples.key_down
-            }
+        let list = if vk == VK_RETURN.0 as u32 && !samples.enter.is_empty() {
+            &samples.enter
+        } else if vk == VK_BACK.0 as u32 && !samples.backspace.is_empty() {
+            &samples.backspace
         } else {
-            &samples.key_up
+            &samples.key_down
         };
 
         self.emit(list);

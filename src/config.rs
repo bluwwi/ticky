@@ -8,6 +8,8 @@ pub struct Config {
     pub active_pack: String,
     pub sound_enabled: bool,
     pub muted: bool,
+    pub output_device: String,
+    pub autostart: Option<bool>,
 }
 
 impl Default for Config {
@@ -16,6 +18,8 @@ impl Default for Config {
             active_pack: "classic-office".to_owned(),
             sound_enabled: true,
             muted: false,
+            output_device: String::new(),
+            autostart: None,
         }
     }
 }

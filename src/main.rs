@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod autostart;
 mod config;
 mod hooks;
 mod packs;
@@ -9,7 +10,7 @@ slint::slint! {
     #[edition = "1.19"]
 
     import "../assets/fonts/Manrope-Variable.ttf";
-    import { Palette, VerticalBox } from "std-widgets.slint";
+    import { Palette, VerticalBox, ComboBox } from "std-widgets.slint";
 
     component Toggle {
         in-out property <bool> on;
@@ -157,9 +158,9 @@ slint::slint! {
         title: "Ticky";
         default-font-family: "Manrope";
         preferred-width: 560px;
-        preferred-height: 636px;
+        preferred-height: 780px;
         min-width: 480px;
-        min-height: 560px;
+        min-height: 680px;
         background: #0E0F12;
 
         in property <[string]> pack-names;
@@ -168,11 +169,15 @@ slint::slint! {
         in property <string> current-pack-author: "";
         in property <string> current-pack-license: "";
         in property <string> current-pack-description: "";
+        in property <[string]> output-devices;
+        in-out property <int> output-device-index: 0;
         in-out property <bool> sound-enabled: true;
         in-out property <bool> muted: false;
+        in-out property <bool> autostart-enabled: false;
         in-out property <string> status: "Ready";
 
         callback select-pack(int);
+        callback select-output(string);
         callback apply();
         callback preview();
         callback reload-packs();
@@ -327,6 +332,43 @@ slint::slint! {
             }
 
             Text {
+                text: "OUTPUT";
+                color: #6F7585;
+                font-size: 11px;
+                font-weight: 600;
+            }
+
+            Rectangle {
+                height: 56px;
+                border-radius: 12px;
+                background: #161921;
+                border-width: 1px;
+                border-color: #232733;
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Output device";
+                        color: #E7E9EE;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    ComboBox {
+                        min-width: 260px;
+                        model: root.output-devices;
+                        current-index: root.output-device-index;
+                        selected(name) => { root.select-output(name); }
+                    }
+                }
+            }
+
+            Text {
                 text: "OPTIONS";
                 color: #6F7585;
                 font-size: 11px;
@@ -344,6 +386,13 @@ slint::slint! {
                 label: "Mute";
                 hint: "Keep the app running without making noise";
                 on <=> root.muted;
+                toggled => { root.apply(); }
+            }
+
+            OptionRow {
+                label: "Start with Windows";
+                hint: "Launch Ticky automatically when you sign in";
+                on <=> root.autostart-enabled;
                 toggled => { root.apply(); }
             }
 
@@ -393,8 +442,23 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 fn main() -> Result<(), slint::PlatformError> {
-    let config = config::Config::load();
+    let mut config = config::Config::load();
+    let choice_path = config::config_path()
+        .parent()
+        .map(|parent| parent.join("autostart.choice"));
+    if let Some(path) = choice_path {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            config.autostart = Some(text.trim().eq_ignore_ascii_case("true"));
+            let _ = std::fs::remove_file(&path);
+            let _ = config.save();
+        }
+    }
+    let autostart = config
+        .autostart
+        .unwrap_or_else(|| autostart::is_enabled().unwrap_or(false));
+    let autostart_error = autostart::set_enabled(autostart).err();
     let loaded = packs::load_packs();
+    let devices = Rc::new(audio::output_devices());
 
     let window = AppWindow::new()?;
 
@@ -403,14 +467,33 @@ fn main() -> Result<(), slint::PlatformError> {
         .position(|pack| pack.manifest.id == config.active_pack)
         .unwrap_or(0);
 
+    let preferred_device = if config.output_device.is_empty() {
+        audio::preferred_output_name()
+    } else {
+        Some(config.output_device.clone())
+    };
+    let device_index = preferred_device
+        .as_ref()
+        .and_then(|name| devices.iter().position(|device| device == name))
+        .unwrap_or(0);
+
     window.set_sound_enabled(config.sound_enabled);
     window.set_muted(config.muted);
+    window.set_autostart_enabled(autostart);
     set_pack_models(&window, &loaded);
     window.set_current_pack(active as i32);
     show_pack(&window, loaded.get(active));
+    window.set_output_devices(ModelRc::new(VecModel::from(
+        devices
+            .iter()
+            .map(|name| SharedString::from(name.as_str()))
+            .collect::<Vec<_>>(),
+    )));
+    window.set_output_device_index(device_index as i32);
 
-    let audio = audio::AudioHandle::spawn();
-    let engine = Arc::new(hooks::Engine::new(audio.clone()));
+    let selected_device = devices.get(device_index).cloned();
+    let audio = audio::AudioHandle::spawn(selected_device);
+    let engine = Arc::new(hooks::Engine::new(audio));
     engine.set_flags(config.sound_enabled, config.muted);
     if let Some(pack) = loaded.get(active) {
         engine.set_pack(pack);
@@ -418,6 +501,9 @@ fn main() -> Result<(), slint::PlatformError> {
     hooks::start(engine.clone());
 
     window.set_status(initial_status(loaded.len()).into());
+    if let Some(err) = autostart_error {
+        window.set_status(format!("Startup setting failed: {err}").into());
+    }
 
     let packs = Rc::new(RefCell::new(loaded));
 
@@ -426,6 +512,7 @@ fn main() -> Result<(), slint::PlatformError> {
     window.on_select_pack({
         let weak = weak.clone();
         let packs = packs.clone();
+        let devices = devices.clone();
         let engine = engine.clone();
         move |index| {
             let Some(window) = weak.upgrade() else {
@@ -439,19 +526,40 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_current_pack(index);
             show_pack(&window, Some(pack));
             engine.set_pack(pack);
-            save_config(&window, &packs, &engine);
+            save_config(&window, &packs, &engine, &devices);
+        }
+    });
+
+    window.on_select_output({
+        let weak = weak.clone();
+        let packs = packs.clone();
+        let devices = devices.clone();
+        let engine = engine.clone();
+        move |selected: SharedString| {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let name = selected.to_string();
+            let Some(idx) = devices.iter().position(|device| device == &name) else {
+                return;
+            };
+            window.set_output_device_index(idx as i32);
+            engine.set_audio(audio::AudioHandle::spawn(Some(name.clone())));
+            save_config(&window, &packs.borrow(), &engine, &devices);
+            window.set_status(format!("Output: {name} - live input active").into());
         }
     });
 
     window.on_apply({
         let weak = weak.clone();
         let packs = packs.clone();
+        let devices = devices.clone();
         let engine = engine.clone();
         move || {
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            save_config(&window, &packs.borrow(), &engine);
+            save_config(&window, &packs.borrow(), &engine, &devices);
         }
     });
 
@@ -528,12 +636,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
     window.on_quit_app({
         let weak = weak.clone();
-        let audio = audio.clone();
+        let engine = engine.clone();
         move || {
             if let Some(window) = weak.upgrade() {
                 let _ = window.hide();
             }
-            audio.shutdown();
+            engine.shutdown_audio();
             let _ = slint::quit_event_loop();
         }
     });
@@ -598,10 +706,20 @@ fn show_pack(window: &AppWindow, pack: Option<&packs::Pack>) {
     }
 }
 
-fn save_config(window: &AppWindow, packs: &[packs::Pack], engine: &hooks::Engine) {
+fn save_config(
+    window: &AppWindow,
+    packs: &[packs::Pack],
+    engine: &hooks::Engine,
+    devices: &[String],
+) {
     let idx = window.get_current_pack().max(0) as usize;
     let sound_enabled = window.get_sound_enabled();
     let muted = window.get_muted();
+    let autostart = window.get_autostart_enabled();
+    let output_device = devices
+        .get(window.get_output_device_index().max(0) as usize)
+        .cloned()
+        .unwrap_or_default();
 
     engine.set_flags(sound_enabled, muted);
 
@@ -612,6 +730,8 @@ fn save_config(window: &AppWindow, packs: &[packs::Pack], engine: &hooks::Engine
             .unwrap_or_default(),
         sound_enabled,
         muted,
+        output_device,
+        autostart: Some(autostart),
     };
 
     match config.save() {
@@ -620,7 +740,14 @@ fn save_config(window: &AppWindow, packs: &[packs::Pack], engine: &hooks::Engine
                 .get(idx)
                 .map(|pack| pack.manifest.name.as_str())
                 .unwrap_or("settings");
-            window.set_status(format!("Saved {name} - live input active").into());
+            match autostart::set_enabled(autostart) {
+                Ok(()) => {
+                    window.set_status(format!("Saved {name} - live input active").into());
+                }
+                Err(err) => {
+                    window.set_status(format!("Saved {name}, but startup failed: {err}").into());
+                }
+            }
         }
         Err(err) => window.set_status(format!("Save failed: {err}").into()),
     }
